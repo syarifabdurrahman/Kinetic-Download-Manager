@@ -1,45 +1,45 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
+import '../../core/utils/download_path_manager.dart';
 import '../../data/datasources/remote/background_download_service.dart';
 import '../../data/datasources/remote/download_engine.dart';
 import '../../domain/entities/download_status.dart';
 import '../../domain/entities/download_task.dart';
+import '../../domain/repositories/download_repository.dart';
 import '../../domain/usecases/get_download_queue.dart';
 import '../../domain/usecases/pause_download.dart';
 import '../../domain/usecases/resume_download.dart';
-import '../../domain/usecases/start_download.dart';
 import '../../domain/usecases/remove_download.dart';
 import 'download_event.dart';
 import 'download_state.dart';
 
 class DownloadBloc extends Bloc<DownloadEvent, DownloadState> {
-  final StartDownload _startDownload;
   final PauseDownloadUseCase _pauseDownload;
   final ResumeDownloadUseCase _resumeDownload;
   final GetDownloadQueue _getDownloadQueue;
   final RemoveDownloadUseCase _removeDownload;
   final DownloadEngine _engine;
   final BackgroundDownloadService _notificationService;
+  final DownloadRepository _repository;
   final Map<String, StreamSubscription> _progressSubs = {};
   final _speedFormat = NumberFormat.compact();
   StreamSubscription? _queueSubscription;
 
   DownloadBloc({
-    required StartDownload startDownload,
     required PauseDownloadUseCase pauseDownload,
     required ResumeDownloadUseCase resumeDownload,
     required GetDownloadQueue getDownloadQueue,
     required RemoveDownloadUseCase removeDownload,
     required DownloadEngine engine,
+    required DownloadRepository repository,
     BackgroundDownloadService? notificationService,
-  })  : _startDownload = startDownload,
-        _pauseDownload = pauseDownload,
+  })  : _pauseDownload = pauseDownload,
         _resumeDownload = resumeDownload,
         _getDownloadQueue = getDownloadQueue,
         _removeDownload = removeDownload,
         _engine = engine,
+        _repository = repository,
         _notificationService = notificationService ?? BackgroundDownloadService(),
         super(DownloadInitial()) {
     on<AddDownload>(_onAddDownload);
@@ -53,20 +53,21 @@ class DownloadBloc extends Bloc<DownloadEvent, DownloadState> {
 
   Future<void> _onAddDownload(
       AddDownload event, Emitter<DownloadState> emit) async {
-    await _startDownload(event.url, event.fileName);
+    final taskId = DateTime.now().millisecondsSinceEpoch.toString();
 
-    if (state is DownloadLoaded) {
-      final tasks = (state as DownloadLoaded).tasks;
-      final task = tasks.where((t) => t.url == event.url).lastOrNull;
-      if (task == null) return;
+    await _repository.addTask(DownloadTask(
+      id: taskId,
+      url: event.url,
+      fileName: event.fileName,
+      createdAt: DateTime.now(),
+    ));
 
-      _startEngine(task.id, task.url, task.fileName, task.chunksCount);
-    }
+    _startEngine(taskId, event.url, event.fileName, 4);
   }
 
   Future<void> _startEngine(String taskId, String url, String fileName, int chunks) async {
-    final dir = await getApplicationDocumentsDirectory();
-    final savePath = '${dir.path}/$fileName';
+    final dir = await DownloadPathManager.getPath();
+    final savePath = '$dir/$fileName';
 
     final stream = _engine.downloadFile(
       taskId: taskId, url: url, savePath: savePath, chunks: chunks,
@@ -130,7 +131,7 @@ class DownloadBloc extends Bloc<DownloadEvent, DownloadState> {
             downloadedBytes: event.downloadedBytes,
             totalBytes: event.totalBytes,
             speed: event.speed,
-            status: event.downloadedBytes >= event.totalBytes
+            status: event.totalBytes > 0 && event.downloadedBytes >= event.totalBytes
                 ? DownloadStatus.completed
                 : DownloadStatus.downloading,
           );

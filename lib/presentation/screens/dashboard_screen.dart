@@ -102,10 +102,19 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Future<void> _autoDetect(String url) async {
-    final info = await _detector.detectFromUrl(url);
-    _nameController.text = info.fileName;
-    _detectedCategory = info.category;
+  void _autoDetect(String url) {
+    final name = _detector.extractFileName(url, null);
+    if (name != null) {
+      _nameController.text = name;
+    }
+    _detectedCategory = _detector.categoryFromExtension(url);
+
+    _detector.detectFromUrl(url).then((info) {
+      if (mounted && _urlController.text == url) {
+        _nameController.text = info.fileName;
+        _detectedCategory = info.category;
+      }
+    });
   }
 
   void _showAddDialog() {

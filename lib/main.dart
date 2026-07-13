@@ -13,7 +13,6 @@ import 'domain/usecases/get_download_queue.dart';
 import 'domain/usecases/pause_download.dart';
 import 'domain/usecases/remove_download.dart';
 import 'domain/usecases/resume_download.dart';
-import 'domain/usecases/start_download.dart';
 import 'presentation/blocs/download_bloc.dart';
 import 'presentation/screens/main_shell.dart';
 
@@ -69,12 +68,12 @@ class KineticDownloadApp extends StatelessWidget {
       builder: (context, child) {
         return BlocProvider(
           create: (_) => DownloadBloc(
-            startDownload: StartDownload(repository),
             pauseDownload: PauseDownloadUseCase(repository),
             resumeDownload: ResumeDownloadUseCase(repository),
             getDownloadQueue: GetDownloadQueue(repository),
             removeDownload: RemoveDownloadUseCase(repository),
             engine: engine,
+            repository: repository,
           ),
           child: child!,
         );

@@ -6,21 +6,11 @@ class DownloadEngine {
   final Dio _dio;
   final Map<String, CancelToken> _cancelTokens = {};
 
-  DownloadEngine() : _dio = Dio();
-
-  Future<int> getFileSize(String url) async {
-    try {
-      final response = await _dio.head(url);
-      final length = response.headers.value('content-length');
-      return length != null ? int.parse(length) : 0;
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  bool supportsResume(String url) {
-    return true;
-  }
+  DownloadEngine()
+      : _dio = Dio(BaseOptions(
+          connectTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(seconds: 60),
+        ));
 
   Stream<DownloadProgress> downloadFile({
     required String taskId,
@@ -43,14 +33,86 @@ class DownloadEngine {
     final cancelToken = CancelToken();
     _cancelTokens[taskId] = cancelToken;
 
-    final fileSize = await getFileSize(url);
-    if (fileSize == 0) {
-      controller.add(DownloadProgress(taskId: taskId, downloadedBytes: 0, totalBytes: 0, speed: 0));
-      controller.close();
+    // 1) Probe URL: try HEAD, fallback to GET range probe
+    int? fileSize;
+    bool rangeSupported = true;
+    try {
+      final headResp = await _dio.head(url);
+      final cl = headResp.headers.value('content-length');
+      if (cl != null) fileSize = int.parse(cl);
+      // treat missing or "none" accept-ranges as no range support
+      final ar = headResp.headers.value('accept-ranges');
+      if (ar == null || ar.toLowerCase() == 'none') rangeSupported = false;
+    } catch (_) {
+      rangeSupported = false;
+    }
+
+    if (fileSize == null) {
+      // HEAD failed — try GET with small range to sniff size
+      try {
+        final probeResp = await _dio.get<ResponseBody>(
+          url,
+          options: Options(
+            responseType: ResponseType.stream,
+            headers: {'Range': 'bytes=0-0'},
+          ),
+        );
+        final cr = probeResp.headers.value('content-range');
+        if (cr != null) {
+          final match = RegExp(r'/(\d+)$').firstMatch(cr.trim());
+          if (match != null) fileSize = int.parse(match.group(1)!);
+        }
+        final ar = probeResp.headers.value('accept-ranges');
+        if (ar == null || ar.toLowerCase() == 'none') rangeSupported = false;
+      } catch (_) {
+        rangeSupported = false;
+      }
+    }
+
+    if (fileSize == null || fileSize <= 0) {
+      await _downloadSingleStream(url, savePath, cancelToken,
+          (downloaded) {
+        controller.add(DownloadProgress(
+          taskId: taskId, downloadedBytes: downloaded,
+          totalBytes: -1, speed: 0,
+        ));
+      });
+      if (!controller.isClosed) {
+        controller.add(DownloadProgress(
+          taskId: taskId, downloadedBytes: 0,
+          totalBytes: 0, speed: 0,
+        ));
+        await controller.close();
+      }
+      _cancelTokens.remove(taskId);
       return;
     }
 
-    final chunkSize = fileSize ~/ chunks;
+    final size = fileSize;
+
+    if (!rangeSupported) {
+      await _downloadSingleStream(url, savePath, cancelToken,
+          (downloaded) {
+        final elapsed = DateTime.now().difference(_startTimes.putIfAbsent(taskId, () => DateTime.now())).inSeconds;
+        final speed = elapsed > 0 ? downloaded / elapsed : 0.0;
+        controller.add(DownloadProgress(
+          taskId: taskId, downloadedBytes: downloaded,
+          totalBytes: size, speed: speed,
+        ));
+      });
+      if (!controller.isClosed) {
+        controller.add(DownloadProgress(
+          taskId: taskId, downloadedBytes: size,
+          totalBytes: size, speed: 0,
+        ));
+        await controller.close();
+      }
+      _cancelTokens.remove(taskId);
+      _startTimes.remove(taskId);
+      return;
+    }
+
+    final chunkSize = size ~/ chunks;
     final chunkPaths = List.generate(chunks, (i) => '$savePath.part$i');
     final chunkErrors = List<int>.empty(growable: true);
     int totalDownloaded = 0;
@@ -59,7 +121,7 @@ class DownloadEngine {
 
     for (int i = 0; i < chunks; i++) {
       final start = i * chunkSize;
-      final end = (i == chunks - 1) ? fileSize - 1 : start + chunkSize - 1;
+      final end = (i == chunks - 1) ? size - 1 : start + chunkSize - 1;
       final chunkPath = chunkPaths[i];
       final chunkIndex = i;
 
@@ -71,7 +133,7 @@ class DownloadEngine {
           controller.add(DownloadProgress(
             taskId: taskId,
             downloadedBytes: totalDownloaded,
-            totalBytes: fileSize,
+            totalBytes: size,
             speed: speed,
           ));
         },
@@ -99,7 +161,7 @@ class DownloadEngine {
       if (!controller.isClosed) {
         controller.add(DownloadProgress(
           taskId: taskId, downloadedBytes: totalDownloaded,
-          totalBytes: fileSize, speed: 0,
+          totalBytes: size, speed: 0,
         ));
         await controller.close();
       }
@@ -123,11 +185,37 @@ class DownloadEngine {
     await raf.close();
 
     controller.add(DownloadProgress(
-      taskId: taskId, downloadedBytes: fileSize,
-      totalBytes: fileSize, speed: 0,
+      taskId: taskId, downloadedBytes: size,
+      totalBytes: size, speed: 0,
     ));
     await controller.close();
     _cancelTokens.remove(taskId);
+  }
+
+  Future<void> _downloadSingleStream(
+    String url,
+    String savePath,
+    CancelToken cancelToken,
+    void Function(int downloaded) onProgress,
+  ) async {
+    final file = File(savePath);
+    final raf = await file.open(mode: FileMode.write);
+    try {
+      final response = await _dio.get<ResponseBody>(
+        url,
+        options: Options(responseType: ResponseType.stream),
+        cancelToken: cancelToken,
+      );
+      int downloaded = 0;
+      await for (final data in response.data!.stream) {
+        final bytes = data as List<int>;
+        await raf.writeFrom(bytes);
+        downloaded += bytes.length;
+        onProgress(downloaded);
+      }
+    } finally {
+      await raf.close();
+    }
   }
 
   Stream<int> _downloadChunk(
@@ -162,9 +250,12 @@ class DownloadEngine {
     return controller.stream;
   }
 
+  final Map<String, DateTime> _startTimes = {};
+
   void cancel(String taskId) {
     _cancelTokens[taskId]?.cancel();
     _cancelTokens.remove(taskId);
+    _startTimes.remove(taskId);
   }
 
   void cancelAll() {
@@ -172,6 +263,7 @@ class DownloadEngine {
       token.cancel();
     }
     _cancelTokens.clear();
+    _startTimes.clear();
   }
 }
 

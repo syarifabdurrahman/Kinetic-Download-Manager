@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
-import '../widgets/glass_card.dart';
+import '../../core/utils/download_path_manager.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -13,7 +13,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _notifications = true;
   bool _adaptiveBandwidth = true;
   double _speedLimit = 500;
-  double _glassIntensity = 0.7;
+  String _downloadPath = '';
+  final _pathController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPath();
+  }
+
+  @override
+  void dispose() {
+    _pathController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPath() async {
+    final path = await DownloadPathManager.getPath();
+    if (mounted) {
+      setState(() {
+        _downloadPath = path;
+        _pathController.text = path;
+      });
+    }
+  }
+
+  Future<void> _savePath(String path) async {
+    if (path.trim().isEmpty) return;
+    await DownloadPathManager.setPath(path.trim());
+    if (mounted) {
+      setState(() => _downloadPath = path.trim());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Download path updated'),
+          backgroundColor: AppTheme.surfaceContainer,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -43,16 +82,99 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
               const SizedBox(height: 4),
-              Text('Settings',
-                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: AppTheme.onSurface)),
+              const Text('Settings',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: AppTheme.onSurface)),
               const Text('System Configuration v2.4.0',
                   style: TextStyle(fontSize: 12, color: AppTheme.onSurfaceVariant)),
               const SizedBox(height: 24),
+              _sectionHeader('Download Location'),
+              _settingsCard(
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Row(children: [
+                      const Icon(Icons.folder_outlined, size: 18, color: AppTheme.primaryContainer),
+                      const SizedBox(width: 8),
+                      const Text('Save files to',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: () async {
+                          await DownloadPathManager.resetToDefault();
+                          await _loadPath();
+                        },
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Reset', style: TextStyle(fontSize: 12)),
+                        style: TextButton.styleFrom(foregroundColor: AppTheme.primaryContainer),
+                      ),
+                    ]),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _downloadPath.isNotEmpty ? _downloadPath : 'Loading...',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.onSurfaceVariant,
+                                fontFamily: 'monospace',
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: Row(children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _pathController,
+                          decoration: InputDecoration(
+                            hintText: 'Enter custom path...',
+                            hintStyle: const TextStyle(fontSize: 12, color: AppTheme.onSurfaceVariant),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: AppTheme.surfaceContainerHigh,
+                          ),
+                          style: const TextStyle(fontSize: 13, color: AppTheme.onSurface, fontFamily: 'monospace'),
+                          onSubmitted: _savePath,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.check, color: Colors.white, size: 18),
+                          onPressed: () => _savePath(_pathController.text),
+                        ),
+                      ),
+                    ]),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 20),
               _sectionHeader('General'),
-              GlassCard(
-                child: Column(children: [
-                  _toggleTile('Account Profile', Icons.chevron_right, null, (_) {}),
-                  const Divider(color: AppTheme.outlineVariant, height: 1),
+              _settingsCard(
+                Column(children: [
                   _toggleTile('Push Notifications', null, _notifications, (v) {
                     setState(() => _notifications = v!);
                   }),
@@ -60,8 +182,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 20),
               _sectionHeader('Network & Speed'),
-              GlassCard(
-                child: Column(children: [
+              _settingsCard(
+                Column(children: [
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Column(
@@ -89,49 +211,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _toggleTile('Adaptive Bandwidth', null, _adaptiveBandwidth, (v) {
                     setState(() => _adaptiveBandwidth = v!);
                   }),
-                ]),
-              ),
-              const SizedBox(height: 20),
-              _sectionHeader('Appearance'),
-              GlassCard(
-                child: Column(children: [
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(children: [
-                      const Text('Theme Selection',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryContainer.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text('Dark Flux',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primaryContainer)),
-                      ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.chevron_right, color: AppTheme.outline, size: 20),
-                    ]),
-                  ),
-                  const Divider(color: AppTheme.outlineVariant, height: 1),
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Glassmorphism Intensity',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
-                        Slider(
-                          value: _glassIntensity,
-                          min: 0.1, max: 1.0,
-                          activeColor: AppTheme.primaryContainer,
-                          inactiveColor: AppTheme.surfaceContainerHighest,
-                          onChanged: (v) => setState(() => _glassIntensity = v),
-                        ),
-                      ],
-                    ),
-                  ),
                 ]),
               ),
               const SizedBox(height: 32),
@@ -164,6 +243,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _settingsCard(Widget child) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: child,
     );
   }
 
