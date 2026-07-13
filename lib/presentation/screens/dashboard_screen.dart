@@ -10,10 +10,6 @@ import '../blocs/download_bloc.dart';
 import '../blocs/download_event.dart';
 import '../blocs/download_state.dart';
 import '../widgets/download_card.dart';
-import '../widgets/glass_card.dart';
-import '../widgets/glass_progress_bar.dart';
-import '../widgets/speed_gauge.dart';
-import '../widgets/storage_ring.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -31,9 +27,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   StreamSubscription? _linkSub;
   FileCategory _detectedCategory = FileCategory.other;
   bool _hasCheckedClipboard = false;
-  double _totalSpeed = 0;
-  double _globalProgress = 0;
-
+  DownloadStatus? _filter;
 
   @override
   void initState() {
@@ -153,7 +147,11 @@ class _DashboardScreenState extends State<DashboardScreen>
           ]),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: () {
+                _urlController.clear();
+                _nameController.clear();
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
               child: const Text('Cancel'),
             ),
             ElevatedButton(
@@ -163,7 +161,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       _urlController.text, _nameController.text));
                   _urlController.clear();
                   _nameController.clear();
-                  Navigator.pop(ctx);
+                  if (ctx.mounted) Navigator.pop(ctx);
                 }
               },
               child: const Text('Add'),
@@ -178,164 +176,26 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 20),
-              Row(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Row(
                 children: [
-                  Expanded(
-                    child: Text('KFDM',
-                        style: Theme.of(context).textTheme.headlineLarge
-                            ?.copyWith(fontSize: 24, letterSpacing: 1)),
-                  ),
-                  Container(
-                    width: 40, height: 40,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-                    ),
-                    child: const Icon(Icons.person, color: AppTheme.onSurfaceVariant, size: 20),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              BlocBuilder<DownloadBloc, DownloadState>(
-                builder: (context, state) {
-                  if (state is DownloadLoaded) {
-                    final active = state.tasks
-                        .where((t) => t.status == DownloadStatus.downloading);
-                    _totalSpeed = active.fold(0.0, (s, t) => s + t.speed);
-                    _globalProgress = state.tasks.isEmpty
-                        ? 0
-                        : state.tasks.fold(0.0, (p, t) => p + t.progress) /
-                            state.tasks.length;
-                  }
-                  return GlassCard(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(children: [
-                      const Text('GLOBAL BANDWIDTH',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                              letterSpacing: 0.8, color: AppTheme.onSurfaceVariant)),
-                      SpeedGauge(speed: _totalSpeed, label: 'DOWNLOAD'),
-                      const SizedBox(height: 8),
-                      GlassProgressBar(progress: _globalProgress),
-                    ]),
-                  );
-                },
-              ),
-              BlocBuilder<DownloadBloc, DownloadState>(
-                builder: (context, state) {
-                  final bytes = state is DownloadLoaded
-                      ? state.tasks.fold<int>(
-                          0, (b, t) => b + t.downloadedBytes)
-                      : 0;
-                  return GlassCard(
-                    child: StorageRing(bytesUsed: bytes),
-                  );
-                },
-              ),
-              Row(
-                children: [
-                  Text('Active Downloads',
-                      style: Theme.of(context).textTheme.titleMedium),
+                  Text('Downloads',
+                      style: Theme.of(context).textTheme.headlineLarge
+                          ?.copyWith(fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                   const Spacer(),
-                  Text('Clear All',
-                      style: TextStyle(fontSize: 12, color: AppTheme.primary)),
+                  Text('${_activeCount(context)} running',
+                      style: const TextStyle(fontSize: 12, color: AppTheme.onSurfaceVariant)),
                 ],
               ),
-              const SizedBox(height: 8),
-              BlocBuilder<DownloadBloc, DownloadState>(
-                builder: (context, state) {
-                  if (state is DownloadLoaded && state.tasks.isNotEmpty) {
-                    return Column(
-                      children: state.tasks.map((task) =>
-                          DownloadCard(
-                            task: task,
-                            onPause: () => context.read<DownloadBloc>()
-                                .add(PauseDownload(task.id)),
-                            onResume: () => context.read<DownloadBloc>()
-                                .add(ResumeDownload(task.id)),
-                            onRemove: () => context.read<DownloadBloc>()
-                                .add(RemoveDownload(task.id)),
-                          ),
-                      ).toList(),
-                    );
-                  }
-                  return GlassCard(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: const Center(
-                        child: Text('No active downloads',
-                            style: TextStyle(color: AppTheme.onSurfaceVariant)),
-                      ),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Text('Recently Completed',
-                      style: Theme.of(context).textTheme.titleMedium),
-                ],
-              ),
-              const SizedBox(height: 8),
-              BlocBuilder<DownloadBloc, DownloadState>(
-                builder: (context, state) {
-                  if (state is DownloadLoaded) {
-                    final completed = state.tasks
-                        .where((t) => t.status == DownloadStatus.completed)
-                        .toList();
-                    if (completed.isEmpty) {
-                      return GlassCard(
-                        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-                        child: const Center(
-                          child: Text('No completed downloads',
-                              style: TextStyle(color: AppTheme.onSurfaceVariant)),
-                        ),
-                      );
-                    }
-                    return Column(
-                      children: completed.take(5).map((task) => GlassCard(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(children: [
-                          Container(
-                            width: 36, height: 36,
-                            decoration: BoxDecoration(
-                              color: AppTheme.tertiary.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(Icons.check_circle_outline,
-                                color: AppTheme.tertiary, size: 18),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(task.fileName,
-                                    style: const TextStyle(fontSize: 14,
-                                        fontWeight: FontWeight.w600, color: AppTheme.onSurface),
-                                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                                Text('${(task.totalBytes / 1073741824).toStringAsFixed(1)} GB • Completed',
-                                    style: const TextStyle(fontSize: 11, color: AppTheme.onSurfaceVariant)),
-                              ],
-                            ),
-                          ),
-                          const Icon(Icons.more_horiz, color: AppTheme.outline, size: 20),
-                        ]),
-                      )).toList(),
-                    );
-                  }
-                  return const SizedBox();
-                },
-              ),
-              const SizedBox(height: 80),
-            ],
-          ),
+            ),
+            const SizedBox(height: 12),
+            _buildFilterChips(),
+            const SizedBox(height: 8),
+            Expanded(child: _buildList()),
+          ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -343,6 +203,107 @@ class _DashboardScreenState extends State<DashboardScreen>
         backgroundColor: AppTheme.primaryContainer,
         child: const Icon(Icons.add, color: Colors.white),
       ),
+    );
+  }
+
+  Widget _buildFilterChips() {
+    final filters = <DownloadStatus?>[
+      null,
+      DownloadStatus.downloading,
+      DownloadStatus.paused,
+      DownloadStatus.completed,
+    ];
+    final labels = ['All', 'Active', 'Paused', 'Completed'];
+
+    return SizedBox(
+      height: 36,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: filters.length,
+        separatorBuilder: (_, i) => const SizedBox(width: 6),
+        itemBuilder: (context, i) {
+          final selected = _filter == filters[i];
+          return ChoiceChip(
+            label: Text(labels[i], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            selected: selected,
+            selectedColor: AppTheme.primaryContainer,
+            backgroundColor: AppTheme.surfaceContainerHigh,
+            labelStyle: TextStyle(
+              color: selected ? Colors.white : AppTheme.onSurfaceVariant,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide.none,
+            ),
+            onSelected: (_) => setState(() => _filter = filters[i]),
+          );
+        },
+      ),
+    );
+  }
+
+  int _activeCount(BuildContext context) {
+    final state = context.watch<DownloadBloc>().state;
+    if (state is DownloadLoaded) {
+      return state.tasks.where((t) => t.status == DownloadStatus.downloading).length;
+    }
+    return 0;
+  }
+
+  Widget _buildList() {
+    return BlocBuilder<DownloadBloc, DownloadState>(
+      builder: (context, state) {
+        if (state is DownloadInitial) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (state is DownloadLoading) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (state is DownloadError) {
+          return Center(child: Text(state.message, style: const TextStyle(color: AppTheme.error)));
+        }
+        if (state is DownloadLoaded) {
+          var tasks = state.tasks.toList();
+          if (_filter != null) {
+            tasks = tasks.where((t) => t.status == _filter).toList();
+          }
+          tasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+          if (tasks.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.download_outlined, size: 48, color: AppTheme.outline.withValues(alpha: 0.5)),
+                  const SizedBox(height: 12),
+                  Text('No downloads yet',
+                      style: TextStyle(fontSize: 16, color: AppTheme.onSurfaceVariant)),
+                  const SizedBox(height: 4),
+                  Text('Tap + to add a download URL',
+                      style: TextStyle(fontSize: 12, color: AppTheme.outline)),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            itemCount: tasks.length + 1,
+            itemBuilder: (context, i) {
+              if (i == tasks.length) return const SizedBox(height: 80);
+              final task = tasks[i];
+              return DownloadCard(
+                task: task,
+                onPause: () => context.read<DownloadBloc>().add(PauseDownload(task.id)),
+                onResume: () => context.read<DownloadBloc>().add(ResumeDownload(task.id)),
+                onRemove: () => context.read<DownloadBloc>().add(RemoveDownload(task.id)),
+              );
+            },
+          );
+        }
+        return const SizedBox();
+      },
     );
   }
 }
