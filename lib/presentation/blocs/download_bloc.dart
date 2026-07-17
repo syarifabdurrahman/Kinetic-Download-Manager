@@ -67,7 +67,7 @@ class DownloadBloc extends Bloc<DownloadEvent, DownloadState> {
       if (dot > 0) {
         final base = fileName.substring(0, dot);
         final ext = fileName.substring(dot);
-        fileName = '${base} ($counter)$ext';
+        fileName = '$base ($counter)$ext';
       } else {
         fileName = '$fileName ($counter)';
       }
