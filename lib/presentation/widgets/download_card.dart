@@ -10,6 +10,8 @@ class DownloadCard extends StatelessWidget {
   final VoidCallback? onPause;
   final VoidCallback? onResume;
   final VoidCallback? onRemove;
+  final VoidCallback? onOpen;
+  final VoidCallback? onShowInFolder;
 
   const DownloadCard({
     super.key,
@@ -17,6 +19,8 @@ class DownloadCard extends StatelessWidget {
     this.onPause,
     this.onResume,
     this.onRemove,
+    this.onOpen,
+    this.onShowInFolder,
   });
 
   static final _detector = FileTypeDetector();
@@ -152,13 +156,32 @@ class DownloadCard extends StatelessWidget {
 
   Widget _actionButton(FileCategory category) {
     if (task.status == DownloadStatus.downloading) {
-      return _miniIcon(Icons.pause_rounded, onPause, _colorForCategory(category));
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _miniIcon(Icons.pause_rounded, onPause, _colorForCategory(category)),
+          _miniIcon(Icons.close_rounded, onRemove, AppTheme.error),
+        ],
+      );
     }
     if (task.status == DownloadStatus.paused) {
-      return _miniIcon(Icons.play_arrow_rounded, onResume, _colorForCategory(category));
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _miniIcon(Icons.play_arrow_rounded, onResume, _colorForCategory(category)),
+          _miniIcon(Icons.close_rounded, onRemove, AppTheme.error),
+        ],
+      );
     }
     if (task.status == DownloadStatus.completed) {
-      return _miniIcon(Icons.delete_outline_rounded, onRemove, AppTheme.onSurfaceVariant);
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _miniIcon(Icons.folder_open_rounded, onShowInFolder, AppTheme.onSurfaceVariant),
+          _miniIcon(Icons.open_in_new_rounded, onOpen, _colorForCategory(category)),
+          _miniIcon(Icons.delete_outline_rounded, onRemove, AppTheme.onSurfaceVariant),
+        ],
+      );
     }
     return _miniIcon(Icons.delete_outline_rounded, onRemove, AppTheme.onSurfaceVariant);
   }

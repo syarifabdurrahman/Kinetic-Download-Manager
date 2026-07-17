@@ -64,6 +64,23 @@ class UpdateProgress extends DownloadEvent {
 
 class LoadDownloads extends DownloadEvent {}
 
+class DownloadCompleted extends DownloadEvent {
+  final String taskId;
+  final String savePath;
+  final String fileName;
+
+  const DownloadCompleted({
+    required this.taskId,
+    required this.savePath,
+    required this.fileName,
+  });
+
+  @override
+  List<Object?> get props => [taskId, savePath, fileName];
+}
+
+class DismissCompleted extends DownloadEvent {}
+
 class DownloadQueueUpdated extends DownloadEvent {
   final List<DownloadTask> tasks;
 

@@ -1,10 +1,15 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:open_filex/open_filex.dart';
 import '../../core/theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 
 class DownloadDetailScreen extends StatelessWidget {
-  const DownloadDetailScreen({super.key});
+  final String? filePath;
+  final String? fileName;
+
+  const DownloadDetailScreen({super.key, this.filePath, this.fileName});
 
   @override
   Widget build(BuildContext context) {
@@ -51,13 +56,13 @@ class DownloadDetailScreen extends StatelessWidget {
                           color: Colors.white, size: 28),
                     ),
                     const SizedBox(height: 12),
-                    const Text('Cyberpunk_Final_Build_v2.zip',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
+                    Text(fileName ?? 'Unknown file',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
                             color: AppTheme.onSurface),
                         textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 4),
-                    const Text('42.8 GB',
-                        style: TextStyle(fontSize: 13, color: AppTheme.onSurfaceVariant)),
+                    Text(filePath ?? '',
+                        style: const TextStyle(fontSize: 12, color: AppTheme.onSurfaceVariant)),
                   ]),
                 ),
               ),
@@ -103,7 +108,7 @@ class DownloadDetailScreen extends StatelessWidget {
               Row(children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: () {},
+                    onPressed: filePath != null ? () => OpenFilex.open(filePath!) : null,
                     icon: const Icon(Icons.open_in_new, size: 18),
                     label: const Text('Open File'),
                   ),
@@ -116,8 +121,13 @@ class DownloadDetailScreen extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: IconButton(
-                    icon: const Icon(Icons.share_outlined, color: AppTheme.onSurfaceVariant),
-                    onPressed: () {},
+                    icon: const Icon(Icons.folder_open, color: AppTheme.onSurfaceVariant),
+                    onPressed: filePath != null
+                        ? () {
+                            final dir = Directory(filePath!).parent.path;
+                            OpenFilex.open(dir);
+                          }
+                        : null,
                   ),
                 ),
                 const SizedBox(width: 12),

@@ -28,6 +28,9 @@ class DownloadTaskModel extends HiveObject {
   @HiveField(7)
   final DateTime createdAt;
 
+  @HiveField(8)
+  final String? savePath;
+
   DownloadTaskModel({
     required this.id,
     required this.url,
@@ -37,6 +40,7 @@ class DownloadTaskModel extends HiveObject {
     required this.status,
     required this.chunksCount,
     required this.createdAt,
+    this.savePath,
   });
 
   factory DownloadTaskModel.fromEntity(DownloadTask task) {
@@ -49,6 +53,7 @@ class DownloadTaskModel extends HiveObject {
       status: task.status.name,
       chunksCount: task.chunksCount,
       createdAt: task.createdAt,
+      savePath: task.savePath,
     );
   }
 
@@ -57,6 +62,7 @@ class DownloadTaskModel extends HiveObject {
       id: id,
       url: url,
       fileName: fileName,
+      savePath: savePath,
       totalBytes: totalBytes,
       downloadedBytes: downloadedBytes,
       status: DownloadStatus.values.firstWhere((e) => e.name == status),

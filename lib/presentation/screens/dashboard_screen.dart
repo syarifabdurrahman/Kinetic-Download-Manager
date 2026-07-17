@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:open_filex/open_filex.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/file_type_detector.dart';
 import '../../core/utils/link_handler.dart';
@@ -25,6 +27,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   final _detector = FileTypeDetector();
   final _linkHandler = LinkHandler();
   StreamSubscription? _linkSub;
+  StreamSubscription? _blocSub;
   FileCategory _detectedCategory = FileCategory.other;
   bool _hasCheckedClipboard = false;
   DownloadStatus? _filter;
@@ -33,6 +36,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _listenForCompleted();
     context.read<DownloadBloc>().add(LoadDownloads());
 
     _linkHandler.init().then((_) {
@@ -52,6 +56,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _urlController.dispose();
     _nameController.dispose();
     _linkSub?.cancel();
+    _blocSub?.cancel();
     super.dispose();
   }
 
@@ -63,6 +68,30 @@ class _DashboardScreenState extends State<DashboardScreen>
     } else if (state == AppLifecycleState.inactive) {
       _hasCheckedClipboard = false;
     }
+  }
+
+  void _listenForCompleted() {
+    _blocSub = context.read<DownloadBloc>().stream.listen((state) {
+      if (state is DownloadLoaded && state.lastCompleted != null && mounted) {
+        final task = state.lastCompleted!;
+        final snackBar = SnackBar(
+          backgroundColor: AppTheme.surfaceContainer,
+          content: Text('${task.fileName} downloaded'),
+          action: SnackBarAction(
+            label: 'Open',
+            textColor: AppTheme.primary,
+            onPressed: () {
+              if (task.savePath != null) OpenFilex.open(task.savePath!);
+            },
+          ),
+          duration: const Duration(seconds: 6),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        );
+        ScaffoldMessenger.of(context).showSnackBar(snackBar);
+        context.read<DownloadBloc>().add(DismissCompleted());
+      }
+    });
   }
 
   Future<void> _checkClipboard() async {
@@ -252,6 +281,35 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  void _openFile(String path) {
+    OpenFilex.open(path).then((result) {
+      if (result.type != ResultType.done && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppTheme.surfaceContainer,
+            content: Text('Cannot open file: ${result.message}'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    });
+  }
+
+  void _showInFolder(String path) {
+    final dir = Directory(path).parent.path;
+    OpenFilex.open(dir).then((result) {
+      if (result.type != ResultType.done && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppTheme.surfaceContainer,
+            content: Text('Cannot open folder: ${result.message}'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    });
+  }
+
   int _activeCount(BuildContext context) {
     final state = context.watch<DownloadBloc>().state;
     if (state is DownloadLoaded) {
@@ -307,6 +365,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                 onPause: () => context.read<DownloadBloc>().add(PauseDownload(task.id)),
                 onResume: () => context.read<DownloadBloc>().add(ResumeDownload(task.id)),
                 onRemove: () => context.read<DownloadBloc>().add(RemoveDownload(task.id)),
+                onOpen: task.savePath != null ? () => _openFile(task.savePath!) : null,
+                onShowInFolder: task.savePath != null ? () => _showInFolder(task.savePath!) : null,
               );
             },
           );

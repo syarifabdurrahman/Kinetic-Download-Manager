@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:open_filex/open_filex.dart';
 import '../../core/theme/app_theme.dart';
 import '../../domain/entities/download_status.dart';
 import '../blocs/download_bloc.dart';
@@ -79,6 +81,15 @@ class LibraryScreen extends StatelessWidget {
                           task: task,
                           onRemove: () => context.read<DownloadBloc>()
                               .add(RemoveDownload(task.id)),
+                          onOpen: task.savePath != null
+                              ? () => OpenFilex.open(task.savePath!)
+                              : null,
+                          onShowInFolder: task.savePath != null
+                              ? () {
+                                  final dir = Directory(task.savePath!).parent.path;
+                                  OpenFilex.open(dir);
+                                }
+                              : null,
                         );
                       },
                     );

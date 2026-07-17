@@ -14,11 +14,12 @@ class DownloadLoading extends DownloadState {}
 
 class DownloadLoaded extends DownloadState {
   final List<DownloadTask> tasks;
+  final DownloadTask? lastCompleted;
 
-  const DownloadLoaded(this.tasks);
+  const DownloadLoaded(this.tasks, {this.lastCompleted});
 
   @override
-  List<Object?> get props => [tasks];
+  List<Object?> get props => [tasks, lastCompleted];
 }
 
 class DownloadError extends DownloadState {

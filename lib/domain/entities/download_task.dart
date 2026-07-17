@@ -4,6 +4,7 @@ class DownloadTask {
   final String id;
   final String url;
   final String fileName;
+  final String? savePath;
   final int totalBytes;
   final int downloadedBytes;
   final DownloadStatus status;
@@ -15,6 +16,7 @@ class DownloadTask {
     required this.id,
     required this.url,
     required this.fileName,
+    this.savePath,
     this.totalBytes = 0,
     this.downloadedBytes = 0,
     this.status = DownloadStatus.pending,
@@ -27,6 +29,7 @@ class DownloadTask {
     String? id,
     String? url,
     String? fileName,
+    String? savePath,
     int? totalBytes,
     int? downloadedBytes,
     DownloadStatus? status,
@@ -38,6 +41,7 @@ class DownloadTask {
       id: id ?? this.id,
       url: url ?? this.url,
       fileName: fileName ?? this.fileName,
+      savePath: savePath ?? this.savePath,
       totalBytes: totalBytes ?? this.totalBytes,
       downloadedBytes: downloadedBytes ?? this.downloadedBytes,
       status: status ?? this.status,

@@ -68,16 +68,38 @@ class FileTypeDetector {
         } else if (name.startsWith("'") && name.endsWith("'")) {
           name = name.substring(1, name.length - 1);
         }
-        return name;
+        return _sanitizeFilename(Uri.decodeComponent(name));
       }
     }
     try {
       final uri = Uri.parse(url);
+
+      for (final param in ['attach', 'file', 'filename', 'name', 'file_name', 'download', 'fn']) {
+        final value = uri.queryParameters[param];
+        if (value != null && value.isNotEmpty) {
+          var decoded = value;
+          if (decoded.contains('%')) decoded = Uri.decodeComponent(decoded);
+          if (decoded.contains('%')) decoded = Uri.decodeComponent(decoded);
+          decoded = _sanitizeFilename(decoded);
+          if (decoded.isNotEmpty) return decoded;
+        }
+      }
+
       final path = uri.pathSegments.where((s) => s.isNotEmpty);
-      return path.isNotEmpty ? path.last : null;
+      if (path.isNotEmpty) {
+        var name = path.last;
+        final qIndex = name.indexOf('?');
+        if (qIndex >= 0) name = name.substring(0, qIndex);
+        return name;
+      }
+      return null;
     } catch (_) {
       return null;
     }
+  }
+
+  String _sanitizeFilename(String name) {
+    return name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
   }
 
   FileCategory categoryFromExtension(String url) {

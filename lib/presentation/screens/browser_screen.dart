@@ -53,7 +53,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   void _interceptDownload(String url) {
-    final fileName = url.split('/').last;
+    final fileName = _detector.extractFileName(url, null) ?? 'download.bin';
     final category = _detector.categoryFromExtension(url);
     final label = _detector.getCategoryLabel(category);
 

@@ -20,12 +20,13 @@ class DownloadTaskModelAdapter extends TypeAdapter<DownloadTaskModel> {
       status: fields[5] as String,
       chunksCount: fields[6] as int,
       createdAt: fields[7] as DateTime,
+      savePath: fields[8] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, DownloadTaskModel obj) {
-    writer.writeByte(8);
+    writer.writeByte(9);
     writer.writeByte(0);
     writer.write(obj.id);
     writer.writeByte(1);
@@ -42,5 +43,7 @@ class DownloadTaskModelAdapter extends TypeAdapter<DownloadTaskModel> {
     writer.write(obj.chunksCount);
     writer.writeByte(7);
     writer.write(obj.createdAt);
+    writer.writeByte(8);
+    writer.write(obj.savePath);
   }
 }
