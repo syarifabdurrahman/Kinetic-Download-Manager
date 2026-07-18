@@ -115,16 +115,26 @@ class _DashboardScreenState extends State<DashboardScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: AppTheme.surfaceContainer,
-        content: const Text('URL detected in clipboard'),
-        action: SnackBarAction(
-          label: 'Add', textColor: AppTheme.primary,
-          onPressed: () {
+        content: GestureDetector(
+          onTap: () {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
             _urlController.text = url;
             _autoDetect(url);
             _showAddDialog();
           },
+          child: const Row(
+            children: [
+              Icon(Icons.content_paste_rounded, size: 16, color: AppTheme.primary),
+              SizedBox(width: 8),
+              Expanded(child: Text('URL detected in clipboard – tap to add')),
+            ],
+          ),
         ),
-        duration: const Duration(seconds: 6),
+        action: SnackBarAction(
+          label: 'Cancel', textColor: AppTheme.onSurfaceVariant,
+          onPressed: () => ScaffoldMessenger.of(context).hideCurrentSnackBar(),
+        ),
+        duration: const Duration(seconds: 8),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),

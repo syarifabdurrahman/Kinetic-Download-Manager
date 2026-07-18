@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/cookie_helper.dart';
 import '../../core/utils/file_type_detector.dart';
 import '../blocs/download_bloc.dart';
 import '../blocs/download_event.dart';
@@ -118,7 +119,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       onNavigationRequest: (request) {
         final url = request.url;
         if (_downloadExtensions.hasMatch(url)) {
-          _interceptDownload(url);
+          _prepareDownload(url);
           return NavigationDecision.prevent;
         }
         return NavigationDecision.navigate;
@@ -153,7 +154,60 @@ class _BrowserScreenState extends State<BrowserScreen> {
     FocusScope.of(context).unfocus();
   }
 
-  void _interceptDownload(String url) {
+  void _prepareDownload(String url) async {
+    Map<String, String>? headers;
+    try {
+      final tab = _currentTab;
+      final controller = tab.controller;
+      String? userAgent;
+      if (controller != null) {
+        final ua = await controller.runJavaScriptReturningResult('navigator.userAgent');
+        var uaStr = ua.toString();
+        if (uaStr.startsWith('"') && uaStr.endsWith('"')) {
+          uaStr = uaStr.substring(1, uaStr.length - 1);
+        }
+        uaStr = uaStr.replaceAll(r'\"', '"');
+        if (uaStr.trim().isNotEmpty) {
+          userAgent = uaStr.trim();
+        }
+      }
+
+      final cookies = await CookieHelper.getCookies(url);
+      final referrerCookies = await CookieHelper.getCookies(_currentTab.url);
+      final referrer = _currentTab.url;
+      final map = <String, String>{};
+
+      final cookieMap = <String, String>{};
+      void parseCookies(String? cookieStr) {
+        if (cookieStr == null || cookieStr.trim().isEmpty) return;
+        final pairs = cookieStr.split(';');
+        for (final pair in pairs) {
+          final idx = pair.indexOf('=');
+          if (idx > 0) {
+            final key = pair.substring(0, idx).trim();
+            final val = pair.substring(idx + 1).trim();
+            cookieMap[key] = val;
+          }
+        }
+      }
+      parseCookies(cookies);
+      parseCookies(referrerCookies);
+
+      if (cookieMap.isNotEmpty) {
+        map['Cookie'] = cookieMap.entries.map((e) => '${e.key}=${e.value}').join('; ');
+      }
+      if (referrer.startsWith('http')) {
+        map['Referer'] = referrer;
+      }
+      if (userAgent != null) {
+        map['User-Agent'] = userAgent;
+      }
+      if (map.isNotEmpty) headers = map;
+    } catch (_) {}
+    _interceptDownload(url, headers);
+  }
+
+  void _interceptDownload(String url, [Map<String, String>? headers]) {
     final fileName = _detector.extractFileName(url, null) ?? 'download.bin';
     final category = _detector.categoryFromExtension(url);
     final label = _detector.getCategoryLabel(category);
@@ -230,7 +284,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   child: ElevatedButton.icon(
                     onPressed: () {
                       Navigator.pop(ctx);
-                      context.read<DownloadBloc>().add(AddDownload(url, fileName));
+                      context.read<DownloadBloc>().add(AddDownload(url, fileName, headers: headers));
                     },
                     icon: const Icon(Icons.download_rounded, size: 18),
                     label: const Text('Download'),

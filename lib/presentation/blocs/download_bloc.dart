@@ -83,14 +83,14 @@ class DownloadBloc extends Bloc<DownloadEvent, DownloadState> {
       createdAt: DateTime.now(),
     ));
 
-    _startEngine(taskId, event.url, savePath, 4);
+    _startEngine(taskId, event.url, savePath, headers: event.headers);
   }
 
-  Future<void> _startEngine(String taskId, String url, String savePath, int chunks) async {
+  Future<void> _startEngine(String taskId, String url, String savePath, {Map<String, String>? headers}) async {
     final fileName = savePath.split(RegExp(r'[/\\]')).last;
 
     final stream = _engine.downloadFile(
-      taskId: taskId, url: url, savePath: savePath, chunks: chunks,
+      taskId: taskId, url: url, savePath: savePath, extraHeaders: headers,
     );
 
     _progressSubs[taskId] = stream.listen(
@@ -132,7 +132,7 @@ class DownloadBloc extends Bloc<DownloadEvent, DownloadState> {
       if (task != null) {
         final dir = await DownloadPathManager.getPath();
         final savePath = task.savePath ?? '$dir/${task.fileName}';
-        _startEngine(task.id, task.url, savePath, task.chunksCount);
+        _startEngine(task.id, task.url, savePath);
       }
     }
   }
@@ -196,11 +196,17 @@ class DownloadBloc extends Bloc<DownloadEvent, DownloadState> {
     _updateNotification(event.tasks);
   }
 
-  void _onDownloadCompleted(
-      DownloadCompleted event, Emitter<DownloadState> emit) {
+  Future<void> _onDownloadCompleted(
+      DownloadCompleted event, Emitter<DownloadState> emit) async {
     if (state is DownloadLoaded) {
       final loaded = state as DownloadLoaded;
       final completed = loaded.tasks.where((t) => t.id == event.taskId).lastOrNull;
+      if (completed != null) {
+        await _repository.updateTask(completed.copyWith(
+          status: DownloadStatus.completed,
+          downloadedBytes: completed.totalBytes,
+        ));
+      }
       emit(DownloadLoaded(loaded.tasks, lastCompleted: completed));
     }
   }

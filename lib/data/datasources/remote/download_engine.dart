@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 class DownloadEngine {
   final Dio _dio;
   final Map<String, CancelToken> _cancelTokens = {};
+  final Map<String, Timer> _progressTimers = {};
 
   DownloadEngine()
       : _dio = Dio(BaseOptions(
@@ -19,10 +20,10 @@ class DownloadEngine {
     required String taskId,
     required String url,
     required String savePath,
-    required int chunks,
+    Map<String, String>? extraHeaders,
   }) {
     final controller = StreamController<DownloadProgress>();
-    _startDownload(controller, taskId, url, savePath, chunks);
+    _startDownload(controller, taskId, url, savePath, extraHeaders: extraHeaders);
     return controller.stream;
   }
 
@@ -30,109 +31,123 @@ class DownloadEngine {
     StreamController<DownloadProgress> controller,
     String taskId,
     String url,
-    String savePath,
-    int chunks,
-  ) async {
+    String savePath, {
+    Map<String, String>? extraHeaders,
+  }) async {
     final cancelToken = CancelToken();
     _cancelTokens[taskId] = cancelToken;
 
+    final startTime = DateTime.now();
+
     try {
-      final file = File(savePath);
-      final raf = await file.open(mode: FileMode.write);
-
+      int? totalBytes;
       try {
-        final response = await _dio.get<ResponseBody>(
-          url,
-          options: Options(responseType: ResponseType.stream),
-          cancelToken: cancelToken,
-        );
+        final headResp = await _dio.head(url,
+            options: extraHeaders != null
+                ? Options(headers: extraHeaders)
+                : null);
+        final cl = headResp.headers.value('content-length');
+        if (cl != null) totalBytes = int.tryParse(cl);
+      } catch (_) {}
 
-        final total = response.headers.value('content-length');
-        final totalBytes = total != null ? int.tryParse(total) ?? -1 : -1;
-        final startTime = DateTime.now();
-        int received = 0;
+      final file = File(savePath);
 
-        await for (final chunk in response.data!.stream) {
-          final bytes = chunk as List<int>;
-          await raf.writeFrom(bytes);
-          received += bytes.length;
-
-          final elapsed = DateTime.now().difference(startTime).inSeconds;
-          final speed = elapsed > 0 ? received / elapsed : 0.0;
-
-          if (!controller.isClosed) {
+      final timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+        if (!controller.isClosed) {
+          try {
+            final size = file.lengthSync();
+            final elapsed = DateTime.now().difference(startTime).inSeconds;
+            final speed = elapsed > 0 ? size / elapsed : 0.0;
             controller.add(DownloadProgress(
               taskId: taskId,
-              downloadedBytes: received,
-              totalBytes: totalBytes > 0 ? totalBytes : -1,
+              downloadedBytes: size,
+              totalBytes: totalBytes ?? -1,
               speed: speed,
             ));
-          }
+          } catch (_) {}
         }
+      });
+      _progressTimers[taskId] = timer;
 
-        await raf.close();
+      await _dio.download(
+        url,
+        savePath,
+        cancelToken: cancelToken,
+        deleteOnError: true,
+        options: extraHeaders != null
+            ? Options(headers: extraHeaders)
+            : null,
+      );
 
+      timer.cancel();
+      _progressTimers.remove(taskId);
+
+      final finalSize = await file.length();
+      if (!controller.isClosed) {
+        if (totalBytes != null && finalSize >= totalBytes) {
+          controller.add(DownloadProgress(
+            taskId: taskId,
+            downloadedBytes: totalBytes,
+            totalBytes: totalBytes,
+            speed: 0,
+          ));
+        } else {
+          controller.add(DownloadProgress(
+            taskId: taskId,
+            downloadedBytes: finalSize,
+            totalBytes: totalBytes ?? finalSize,
+            speed: 0,
+          ));
+        }
+        await controller.close();
+      }
+    } on DioException catch (e) {
+      _progressTimers[taskId]?.cancel();
+      _progressTimers.remove(taskId);
+      if (e.type == DioExceptionType.cancel) {
         if (!controller.isClosed) {
-          if (totalBytes > 0) {
-            controller.add(DownloadProgress(
-              taskId: taskId,
-              downloadedBytes: totalBytes,
-              totalBytes: totalBytes,
-              speed: 0,
-            ));
-          }
+          controller.add(DownloadProgress(
+            taskId: taskId,
+            downloadedBytes: 0,
+            totalBytes: 0,
+            speed: 0,
+          ));
           await controller.close();
         }
-      } on DioException catch (e) {
-        await raf.close();
-        if (e.type == DioExceptionType.cancel) {
-          if (!controller.isClosed) {
-            controller.add(DownloadProgress(
-              taskId: taskId,
-              downloadedBytes: 0,
-              totalBytes: 0,
-              speed: 0,
-            ));
-            await controller.close();
-          }
-        } else {
-          if (!controller.isClosed) {
-            controller.addError(e);
-            await controller.close();
-          }
-        }
-      } catch (e) {
-        await raf.close();
+      } else {
         if (!controller.isClosed) {
           controller.addError(e);
           await controller.close();
         }
       }
     } catch (e) {
+      _progressTimers[taskId]?.cancel();
+      _progressTimers.remove(taskId);
       if (!controller.isClosed) {
         controller.addError(e);
         await controller.close();
       }
     } finally {
       _cancelTokens.remove(taskId);
-      _startTimes.remove(taskId);
     }
   }
 
-  final Map<String, DateTime> _startTimes = {};
-
   void cancel(String taskId) {
+    _progressTimers[taskId]?.cancel();
+    _progressTimers.remove(taskId);
     _cancelTokens[taskId]?.cancel();
     _cancelTokens.remove(taskId);
-    _startTimes.remove(taskId);
   }
 
   void cancelAll() {
+    for (final t in _progressTimers.values) {
+      t.cancel();
+    }
+    _progressTimers.clear();
     for (final token in _cancelTokens.values) {
       token.cancel();
     }
     _cancelTokens.clear();
-    _startTimes.clear();
   }
 }
 

@@ -11,11 +11,12 @@ abstract class DownloadEvent extends Equatable {
 class AddDownload extends DownloadEvent {
   final String url;
   final String fileName;
+  final Map<String, String>? headers;
 
-  const AddDownload(this.url, this.fileName);
+  const AddDownload(this.url, this.fileName, {this.headers});
 
   @override
-  List<Object?> get props => [url, fileName];
+  List<Object?> get props => [url, fileName, headers];
 }
 
 class PauseDownload extends DownloadEvent {
