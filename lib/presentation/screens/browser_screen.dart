@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:adblocker_webview/adblocker_webview.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/ad_blocker.dart';
 import '../../core/utils/bookmark_service.dart';
 import '../../core/utils/cookie_helper.dart';
 import '../../core/utils/file_type_detector.dart';
@@ -94,12 +95,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
       onPageStarted: (url) {
         if (!mounted || tab != _currentTab) return;
         if (_pendingDownloadUrl == null) {
-          try {
-            if (AdBlockerWebviewController.instance.shouldBlockResource(url)) {
-              tab.controller?.goBack();
-              return;
-            }
-          } catch (_) {}
+          if (AdBlocker.shouldBlock(url)) {
+            tab.controller?.goBack();
+            return;
+          }
         }
         setState(() {
           tab.isLoading = true;
@@ -140,11 +139,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       },
       onNavigationRequest: (request) {
         if (_pendingDownloadUrl != null) return NavigationDecision.navigate;
-        try {
-          if (AdBlockerWebviewController.instance.shouldBlockResource(request.url)) {
-            return NavigationDecision.prevent;
-          }
-        } catch (_) {}
+        if (AdBlocker.shouldBlock(request.url)) return NavigationDecision.prevent;
         if (_downloadExtensions.hasMatch(request.url)) {
           _directDownload(request.url);
           return NavigationDecision.prevent;

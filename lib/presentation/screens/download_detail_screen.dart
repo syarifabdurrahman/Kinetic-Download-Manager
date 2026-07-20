@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:open_filex/open_filex.dart';
+import 'package:flutter/services.dart';
 import '../../core/theme/app_theme.dart';
 import '../widgets/glass_card.dart';
+
+const _explorerChannel = MethodChannel('kinetic_flux/file_explorer');
 
 class DownloadDetailScreen extends StatelessWidget {
   final String? filePath;
@@ -111,11 +113,33 @@ class DownloadDetailScreen extends StatelessWidget {
                   onPressed: filePath != null
                       ? () {
                           final dir = Directory(filePath!).parent.path;
-                          OpenFilex.open(dir);
+                          _explorerChannel.invokeMethod('showInFolder', {'path': dir}).then((_) {
+                            if (!context.mounted) return;
+                            Clipboard.setData(ClipboardData(text: dir));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Backup path: $dir'),
+                                action: SnackBarAction(label: 'Copied', onPressed: () => Clipboard.setData(ClipboardData(text: dir))),
+                                behavior: SnackBarBehavior.floating,
+                                duration: const Duration(seconds: 5),
+                              ),
+                            );
+                          }).catchError((_) {
+                            if (!context.mounted) return;
+                            Clipboard.setData(ClipboardData(text: dir));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Cannot open explorer. Path: $dir'),
+                                action: SnackBarAction(label: 'Copied', onPressed: () => Clipboard.setData(ClipboardData(text: dir))),
+                                behavior: SnackBarBehavior.floating,
+                                duration: const Duration(seconds: 5),
+                              ),
+                            );
+                          });
                         }
                       : null,
                   icon: const Icon(Icons.folder_open, size: 18),
-                  label: const Text('Show in Folder'),
+                  label: const Text('Show on Explorer'),
                 ),
               ),
               const SizedBox(height: 80),

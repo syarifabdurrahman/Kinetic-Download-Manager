@@ -83,8 +83,19 @@ class LibraryScreen extends StatelessWidget {
                               .add(RemoveDownload(task.id)),
                           onOpen: task.savePath != null
                               ? () {
-                                  final dir = Directory(task.savePath!).parent.path;
-                                  OpenFilex.open(dir);
+                                  if (!File(task.savePath!).existsSync()) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('File not found: ${task.savePath}'), behavior: SnackBarBehavior.floating),
+                                    );
+                                    return;
+                                  }
+                                  OpenFilex.open(task.savePath!, type: '*/*').then((result) {
+                                    if (result.type != ResultType.done && context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Cannot open file: ${result.message}'), behavior: SnackBarBehavior.floating),
+                                      );
+                                    }
+                                  });
                                 }
                               : null,
                           onShowInFolder: null,

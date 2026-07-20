@@ -13,6 +13,8 @@ import '../blocs/download_event.dart';
 import '../blocs/download_state.dart';
 import '../widgets/download_card.dart';
 
+const _explorerChannel = MethodChannel('kinetic_flux/file_explorer');
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -78,7 +80,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           backgroundColor: AppTheme.surfaceContainer,
           content: Text('${task.fileName} downloaded'),
           action: SnackBarAction(
-            label: 'Open',
+            label: 'Show on Explorer',
             textColor: AppTheme.primary,
             onPressed: () {
               if (task.savePath != null) {
@@ -295,13 +297,24 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   void _openFile(String path) {
-    final dir = Directory(path).parent.path;
-    OpenFilex.open(dir).then((result) {
+    if (!File(path).existsSync()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppTheme.surfaceContainer,
+            content: Text('File not found: $path'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+    OpenFilex.open(path, type: '*/*').then((result) {
       if (result.type != ResultType.done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: AppTheme.surfaceContainer,
-            content: Text('Cannot open folder: ${result.message}'),
+            content: Text('Cannot open file ($path): ${result.message}'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -311,16 +324,30 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   void _showInFolder(String path) {
     final dir = Directory(path).parent.path;
-    OpenFilex.open(dir).then((result) {
-      if (result.type != ResultType.done && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppTheme.surfaceContainer,
-            content: Text('Cannot open folder: ${result.message}'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+    _explorerChannel.invokeMethod('showInFolder', {'path': dir}).then((_) {
+      if (!mounted) return;
+      Clipboard.setData(ClipboardData(text: dir));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppTheme.surfaceContainer,
+          content: Text('Backup path: $dir'),
+          action: SnackBarAction(label: 'Copied', textColor: AppTheme.primary, onPressed: () => Clipboard.setData(ClipboardData(text: dir))),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }).catchError((_) {
+      if (!mounted) return;
+      Clipboard.setData(ClipboardData(text: dir));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppTheme.surfaceContainer,
+          content: Text('Cannot open explorer. Path: $dir'),
+          action: SnackBarAction(label: 'Copied', textColor: AppTheme.primary, onPressed: () => Clipboard.setData(ClipboardData(text: dir))),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 5),
+        ),
+      );
     });
   }
 
