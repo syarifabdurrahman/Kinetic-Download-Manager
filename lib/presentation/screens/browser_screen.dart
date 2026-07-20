@@ -30,10 +30,10 @@ class BrowserScreen extends StatefulWidget {
   const BrowserScreen({super.key});
 
   @override
-  State<BrowserScreen> createState() => _BrowserScreenState();
+  State<BrowserScreen> createState() => BrowserScreenState();
 }
 
-class _BrowserScreenState extends State<BrowserScreen> {
+class BrowserScreenState extends State<BrowserScreen> {
   final _urlController = TextEditingController();
   final _detector = FileTypeDetector();
   int _tabCounter = 0;
@@ -429,6 +429,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
       await BookmarkService.add(Bookmark(url: url, title: title));
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bookmark added'), duration: Duration(seconds: 1)));
     }
+  }
+
+  Future<bool> handleBack() async {
+    final tab = _currentTab;
+    if (tab.controller != null && await tab.controller!.canGoBack()) {
+      tab.controller!.goBack();
+      return true;
+    }
+    if (_tabs.length > 1) {
+      _closeTab(_currentIndex);
+      return true;
+    }
+    return false;
   }
 
   @override
