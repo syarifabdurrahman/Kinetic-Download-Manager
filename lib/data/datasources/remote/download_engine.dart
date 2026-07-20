@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:developer' as developer;
 import 'package:dio/dio.dart';
+import 'package:native_dio_adapter/native_dio_adapter.dart';
 
 class DownloadEngine {
   final Dio _dio;
@@ -14,7 +16,11 @@ class DownloadEngine {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
           },
-        ));
+        )) {
+    try {
+      _dio.httpClientAdapter = NativeAdapter();
+    } catch (_) {}
+  }
 
   Stream<DownloadProgress> downloadFile({
     required String taskId,
@@ -52,6 +58,35 @@ class DownloadEngine {
 
       final file = File(savePath);
 
+      final response = await _dio.get(
+        url,
+        cancelToken: cancelToken,
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: extraHeaders,
+          followRedirects: true,
+        ),
+      );
+
+      developer.log(
+        'Download response: ${response.statusCode} ${response.statusMessage}',
+        name: 'DownloadEngine',
+      );
+      for (final entry in response.headers.map.entries) {
+        developer.log('  ${entry.key}: ${entry.value.join(', ')}',
+            name: 'DownloadEngine');
+      }
+
+      if (response.statusCode != 200) {
+        final msg = 'Server returned ${response.statusCode} ${response.statusMessage}';
+        developer.log('Download failed: $msg', name: 'DownloadEngine');
+        controller.addError(Exception(msg));
+        await controller.close();
+        return;
+      }
+
+      final stream = response.data.stream as Stream<List<int>>;
+
       final timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
         if (!controller.isClosed) {
           try {
@@ -69,15 +104,16 @@ class DownloadEngine {
       });
       _progressTimers[taskId] = timer;
 
-      await _dio.download(
-        url,
-        savePath,
-        cancelToken: cancelToken,
-        deleteOnError: true,
-        options: extraHeaders != null
-            ? Options(headers: extraHeaders)
-            : null,
-      );
+      final sink = file.openWrite();
+      int totalWritten = 0;
+      await for (final chunk in stream) {
+        sink.add(chunk);
+        totalWritten += chunk.length;
+      }
+      await sink.close();
+
+      developer.log('Download complete: $totalWritten bytes written to $savePath',
+          name: 'DownloadEngine');
 
       timer.cancel();
       _progressTimers.remove(taskId);

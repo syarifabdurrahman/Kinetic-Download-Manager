@@ -82,14 +82,12 @@ class LibraryScreen extends StatelessWidget {
                           onRemove: () => context.read<DownloadBloc>()
                               .add(RemoveDownload(task.id)),
                           onOpen: task.savePath != null
-                              ? () => OpenFilex.open(task.savePath!)
-                              : null,
-                          onShowInFolder: task.savePath != null
                               ? () {
                                   final dir = Directory(task.savePath!).parent.path;
                                   OpenFilex.open(dir);
                                 }
                               : null,
+                          onShowInFolder: null,
                         );
                       },
                     );

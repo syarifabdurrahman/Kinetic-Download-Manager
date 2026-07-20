@@ -81,7 +81,10 @@ class _DashboardScreenState extends State<DashboardScreen>
             label: 'Open',
             textColor: AppTheme.primary,
             onPressed: () {
-              if (task.savePath != null) OpenFilex.open(task.savePath!);
+              if (task.savePath != null) {
+                final dir = task.savePath!.substring(0, task.savePath!.lastIndexOf('/'));
+                OpenFilex.open(dir);
+              }
             },
           ),
           duration: const Duration(seconds: 6),
@@ -292,12 +295,13 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   void _openFile(String path) {
-    OpenFilex.open(path).then((result) {
+    final dir = Directory(path).parent.path;
+    OpenFilex.open(dir).then((result) {
       if (result.type != ResultType.done && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: AppTheme.surfaceContainer,
-            content: Text('Cannot open file: ${result.message}'),
+            content: Text('Cannot open folder: ${result.message}'),
             behavior: SnackBarBehavior.floating,
           ),
         );

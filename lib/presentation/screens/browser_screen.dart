@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:adblocker_webview/adblocker_webview.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/bookmark_service.dart';
 import '../../core/utils/cookie_helper.dart';
 import '../../core/utils/file_type_detector.dart';
 import '../blocs/download_bloc.dart';
@@ -36,6 +38,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   int _tabCounter = 0;
   final List<_TabData> _tabs = [];
   int _currentIndex = 0;
+  String? _pendingDownloadUrl;
+  String? _pendingDownloadPrevUrl;
+  final List<MapEntry<String, String>> _history = [];
 
   static final _downloadExtensions = RegExp(
     r'\.(mp4|mkv|avi|mov|wmv|flv|webm|m4v|mp3|wav|flac|aac|ogg|m4a|pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|epub|jpg|jpeg|png|gif|bmp|webp|svg|ico|zip|rar|7z|tar|gz|bz2|xz|iso|exe|msi|apk|dmg|deb|rpm|bin)$',
@@ -88,14 +93,24 @@ class _BrowserScreenState extends State<BrowserScreen> {
     controller.setNavigationDelegate(NavigationDelegate(
       onPageStarted: (url) {
         if (!mounted || tab != _currentTab) return;
+        if (_pendingDownloadUrl == null) {
+          try {
+            if (AdBlockerWebviewController.instance.shouldBlockResource(url)) {
+              tab.controller?.goBack();
+              return;
+            }
+          } catch (_) {}
+        }
         setState(() {
           tab.isLoading = true;
           tab.url = url;
           _urlController.text = url;
         });
+        _injectAdblockCss(tab.controller!, url);
       },
       onPageFinished: (url) {
         if (!mounted) return;
+        _addHistory(url);
         controller.getTitle().then((title) {
           if (mounted) setState(() => tab.title = title ?? url);
         });
@@ -111,15 +126,27 @@ class _BrowserScreenState extends State<BrowserScreen> {
             tab.progress = 0;
           });
         }
+        if (_pendingDownloadUrl != null) {
+          final dlUrl = _pendingDownloadUrl!;
+          final prevUrl = _pendingDownloadPrevUrl;
+          _pendingDownloadUrl = null;
+          _pendingDownloadPrevUrl = null;
+          _executeDownloadWithCookies(dlUrl, prevUrl);
+        }
       },
       onProgress: (progress) {
         if (!mounted) return;
         setState(() => tab.progress = progress / 100);
       },
       onNavigationRequest: (request) {
-        final url = request.url;
-        if (_downloadExtensions.hasMatch(url)) {
-          _prepareDownload(url);
+        if (_pendingDownloadUrl != null) return NavigationDecision.navigate;
+        try {
+          if (AdBlockerWebviewController.instance.shouldBlockResource(request.url)) {
+            return NavigationDecision.prevent;
+          }
+        } catch (_) {}
+        if (_downloadExtensions.hasMatch(request.url)) {
+          _directDownload(request.url);
           return NavigationDecision.prevent;
         }
         return NavigationDecision.navigate;
@@ -154,34 +181,46 @@ class _BrowserScreenState extends State<BrowserScreen> {
     FocusScope.of(context).unfocus();
   }
 
-  void _prepareDownload(String url) async {
+  void _handleDownloadViaWebView(String url) async {
+    if (_pendingDownloadUrl != null) return;
+    final controller = _currentTab.controller;
+    if (controller == null) return;
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Loading download URL...'),
+      duration: const Duration(seconds: 1),
+    ));
+
+    _pendingDownloadUrl = url;
+    _pendingDownloadPrevUrl = _currentTab.url;
+    await controller.loadRequest(Uri.parse(url));
+
+    Future.delayed(const Duration(seconds: 8), () {
+      if (_pendingDownloadUrl != null) {
+        final dlUrl = _pendingDownloadUrl!;
+        final prevUrl = _pendingDownloadPrevUrl;
+        _pendingDownloadUrl = null;
+        _pendingDownloadPrevUrl = null;
+        _executeDownloadWithCookies(dlUrl, prevUrl);
+      }
+    });
+  }
+
+  Future<void> _executeDownloadWithCookies(String url, String? prevUrl) async {
+    final fileName = _detector.extractFileName(url, null) ?? 'download.bin';
+
     Map<String, String>? headers;
     try {
-      final tab = _currentTab;
-      final controller = tab.controller;
-      String? userAgent;
-      if (controller != null) {
-        final ua = await controller.runJavaScriptReturningResult('navigator.userAgent');
-        var uaStr = ua.toString();
-        if (uaStr.startsWith('"') && uaStr.endsWith('"')) {
-          uaStr = uaStr.substring(1, uaStr.length - 1);
-        }
-        uaStr = uaStr.replaceAll(r'\"', '"');
-        if (uaStr.trim().isNotEmpty) {
-          userAgent = uaStr.trim();
-        }
-      }
-
-      final cookies = await CookieHelper.getCookies(url);
-      final referrerCookies = await CookieHelper.getCookies(_currentTab.url);
+      final dirCookies = await CookieHelper.getCookies(url);
+      final refCookies = await CookieHelper.getCookies(_currentTab.url);
       final referrer = _currentTab.url;
       final map = <String, String>{};
 
       final cookieMap = <String, String>{};
       void parseCookies(String? cookieStr) {
         if (cookieStr == null || cookieStr.trim().isEmpty) return;
-        final pairs = cookieStr.split(';');
-        for (final pair in pairs) {
+        for (final pair in cookieStr.split(';')) {
           final idx = pair.indexOf('=');
           if (idx > 0) {
             final key = pair.substring(0, idx).trim();
@@ -190,8 +229,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
           }
         }
       }
-      parseCookies(cookies);
-      parseCookies(referrerCookies);
+      parseCookies(dirCookies);
+      parseCookies(refCookies);
 
       if (cookieMap.isNotEmpty) {
         map['Cookie'] = cookieMap.entries.map((e) => '${e.key}=${e.value}').join('; ');
@@ -199,118 +238,202 @@ class _BrowserScreenState extends State<BrowserScreen> {
       if (referrer.startsWith('http')) {
         map['Referer'] = referrer;
       }
-      if (userAgent != null) {
-        map['User-Agent'] = userAgent;
-      }
       if (map.isNotEmpty) headers = map;
     } catch (_) {}
-    _interceptDownload(url, headers);
+
+    if (prevUrl != null) {
+      try {
+        await _currentTab.controller?.loadRequest(Uri.parse(prevUrl));
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Downloading $fileName'),
+      duration: const Duration(seconds: 2),
+    ));
+    context.read<DownloadBloc>().add(AddDownload(url, fileName, headers: headers));
   }
 
-  void _interceptDownload(String url, [Map<String, String>? headers]) {
+  void _directDownload(String url) async {
     final fileName = _detector.extractFileName(url, null) ?? 'download.bin';
-    final category = _detector.categoryFromExtension(url);
-    final label = _detector.getCategoryLabel(category);
+    Map<String, String>? headers;
+    try {
+      final dirCookies = await CookieHelper.getCookies(url);
+      final refCookies = await CookieHelper.getCookies(_currentTab.url);
+      final referrer = _currentTab.url;
+      final map = <String, String>{};
+      final cookieMap = <String, String>{};
+      void parseCookies(String? s) {
+        if (s == null || s.trim().isEmpty) return;
+        for (final pair in s.split(';')) {
+          final idx = pair.indexOf('=');
+          if (idx > 0) cookieMap[pair.substring(0, idx).trim()] = pair.substring(idx + 1).trim();
+        }
+      }
+      parseCookies(dirCookies);
+      parseCookies(refCookies);
+      if (cookieMap.isNotEmpty) map['Cookie'] = cookieMap.entries.map((e) => '${e.key}=${e.value}').join('; ');
+      if (referrer.startsWith('http')) map['Referer'] = referrer;
+      if (map.isNotEmpty) headers = map;
+    } catch (_) {}
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Downloading $fileName'),
+      duration: const Duration(seconds: 2),
+    ));
+    context.read<DownloadBloc>().add(AddDownload(url, fileName, headers: headers));
+  }
 
+  void _injectAdblockCss(WebViewController controller, String url) {
+    try {
+      final rules = AdBlockerWebviewController.instance.getCssRulesForWebsite(url);
+      if (rules.isEmpty) return;
+      final css = rules.map((r) => r.trim()).join(' ').replaceAll("'", "\\'").replaceAll('\n', ' ');
+      controller.runJavaScript("""
+        (function() {
+          try {
+            var s = document.createElement('style');
+            s.textContent = '$css';
+            document.head.appendChild(s);
+          } catch(e) {}
+        })();
+      """);
+    } catch (_) {}
+  }
+
+  void _addHistory(String url) {
+    _history.removeWhere((e) => e.key == url);
+    _history.insert(0, MapEntry(url, _currentTab.title));
+  }
+
+  void _showHistory() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        margin: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTheme.surfaceContainer,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryContainer.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.download_rounded,
-                        color: AppTheme.primaryContainer, size: 24),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text('Download File',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700,
-                            color: AppTheme.onSurface)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppTheme.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(12),
+      backgroundColor: AppTheme.surface,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+                const Text('History',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.delete_sweep, size: 20, color: AppTheme.onSurfaceVariant),
+                  onPressed: () { setState(() => _history.clear()); Navigator.pop(ctx); },
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _detailRow('Name', fileName),
-                    const SizedBox(height: 6),
-                    _detailRow('Type', label),
-                    const SizedBox(height: 6),
-                    _detailRow('Source', url, maxLines: 2, fontSize: 11),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 2,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      context.read<DownloadBloc>().add(AddDownload(url, fileName, headers: headers));
-                    },
-                    icon: const Icon(Icons.download_rounded, size: 18),
-                    label: const Text('Download'),
-                  ),
-                ),
-              ]),
-            ],
+              ],
+            ),
           ),
-        ),
+          if (_history.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Text('No history', style: TextStyle(color: AppTheme.onSurfaceVariant)),
+            )
+          else
+            SizedBox(
+              height: MediaQuery.of(context).size.height * 0.4,
+              child: ListView.builder(
+                itemCount: _history.length,
+                itemBuilder: (_, i) {
+                  final e = _history[i];
+                  return ListTile(
+                    dense: true,
+                    title: Text(e.value == e.key ? e.key : e.value,
+                        style: const TextStyle(fontSize: 13, color: AppTheme.onSurface),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(e.key,
+                        style: const TextStyle(fontSize: 11, color: AppTheme.onSurfaceVariant),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete, size: 16, color: AppTheme.error),
+                      onPressed: () { setState(() => _history.removeAt(i)); Navigator.pop(ctx); _showHistory(); },
+                    ),
+                    onTap: () { Navigator.pop(ctx); _loadUrl(e.key); },
+                  );
+                },
+              ),
+            ),
+        ],
       ),
     );
   }
 
-  Widget _detailRow(String label, String value, {int maxLines = 1, double fontSize = 13}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
-                letterSpacing: 0.5, color: AppTheme.onSurfaceVariant)),
-        const SizedBox(height: 2),
-        Text(value,
-            style: TextStyle(fontSize: fontSize, color: AppTheme.onSurface),
-            maxLines: maxLines, overflow: TextOverflow.ellipsis),
-      ],
+  Future<void> _showBookmarks() async {
+    final bookmarks = await BookmarkService.getAll();
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+                const Text('Bookmarks',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20, color: AppTheme.onSurfaceVariant),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ],
+            ),
+          ),
+          if (bookmarks.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Text('No bookmarks', style: TextStyle(color: AppTheme.onSurfaceVariant)),
+            )
+          else
+            SizedBox(
+              height: MediaQuery.of(context).size.height * 0.4,
+              child: ListView.builder(
+                itemCount: bookmarks.length,
+                itemBuilder: (_, i) {
+                  final b = bookmarks[i];
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.bookmark, size: 18, color: AppTheme.primaryContainer),
+                    title: Text(b.title,
+                        style: const TextStyle(fontSize: 13, color: AppTheme.onSurface),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(b.url,
+                        style: const TextStyle(fontSize: 11, color: AppTheme.onSurfaceVariant),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete, size: 16, color: AppTheme.error),
+                      onPressed: () async {
+                        await BookmarkService.remove(b.url);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        _showBookmarks();
+                      },
+                    ),
+                    onTap: () { Navigator.pop(ctx); _loadUrl(b.url); },
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
     );
+  }
+
+  Future<void> _toggleBookmark() async {
+    final url = _currentTab.url;
+    final title = _currentTab.title;
+    if (await BookmarkService.exists(url)) {
+      await BookmarkService.remove(url);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bookmark removed'), duration: Duration(seconds: 1)));
+    } else {
+      await BookmarkService.add(Bookmark(url: url, title: title));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bookmark added'), duration: Duration(seconds: 1)));
+    }
   }
 
   @override
@@ -347,6 +470,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   style: Theme.of(context).textTheme.headlineLarge
                       ?.copyWith(fontSize: 20, letterSpacing: 1)),
               const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.history_rounded, size: 18),
+                color: AppTheme.onSurfaceVariant,
+                tooltip: 'History',
+                onPressed: _showHistory,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+              IconButton(
+                icon: const Icon(Icons.bookmark_border_rounded, size: 18),
+                color: AppTheme.onSurfaceVariant,
+                tooltip: 'Bookmarks',
+                onPressed: _showBookmarks,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+              const SizedBox(width: 4),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
@@ -451,7 +591,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
               onSubmitted: _loadUrl,
             ),
           ),
-          const SizedBox(width: 8),
+          _buildBookmarkBtn(),
+          const SizedBox(width: 4),
           Container(
             decoration: BoxDecoration(
               color: AppTheme.primaryContainer,
@@ -464,6 +605,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildBookmarkBtn() {
+    return FutureBuilder<bool>(
+      future: BookmarkService.exists(_currentTab.url),
+      builder: (_, snap) {
+        final isBookmarked = snap.data ?? false;
+        return IconButton(
+          icon: Icon(isBookmarked ? Icons.bookmark : Icons.bookmark_border, size: 18, color: AppTheme.primaryContainer),
+          onPressed: () { _toggleBookmark(); setState(() {}); },
+        );
+      },
     );
   }
 
@@ -487,6 +641,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
             icon: const Icon(Icons.refresh_rounded, size: 20),
             color: AppTheme.onSurfaceVariant,
             onPressed: () => _currentTab.controller?.reload(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.download_rounded, size: 20),
+            color: AppTheme.primaryContainer,
+            onPressed: () => _handleDownloadViaWebView(_currentTab.url),
           ),
           IconButton(
             icon: const Icon(Icons.home_rounded, size: 20),

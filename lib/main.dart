@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:adblocker_webview/adblocker_webview.dart';
 import 'core/theme/app_theme.dart';
 import 'data/datasources/local/download_local_datasource.dart';
 import 'data/datasources/remote/background_download_service.dart';
@@ -38,6 +39,14 @@ void main() async {
 
   final repository = DownloadRepositoryImpl(localDatasource);
   final engine = DownloadEngine();
+
+  try {
+    await AdBlockerWebviewController.instance.initialize(
+      FilterConfig(filterTypes: [FilterType.easyList, FilterType.adGuard]),
+    );
+  } catch (e) {
+    debugPrint('AdBlocker init error: $e');
+  }
 
   final bgService = BackgroundDownloadService();
   unawaited(

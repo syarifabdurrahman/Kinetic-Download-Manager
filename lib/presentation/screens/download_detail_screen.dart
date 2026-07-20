@@ -105,44 +105,19 @@ class DownloadDetailScreen extends StatelessWidget {
                 ]),
               ),
               const SizedBox(height: 20),
-              Row(children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: filePath != null ? () => OpenFilex.open(filePath!) : null,
-                    icon: const Icon(Icons.open_in_new, size: 18),
-                    label: const Text('Open File'),
-                  ),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: filePath != null
+                      ? () {
+                          final dir = Directory(filePath!).parent.path;
+                          OpenFilex.open(dir);
+                        }
+                      : null,
+                  icon: const Icon(Icons.folder_open, size: 18),
+                  label: const Text('Show in Folder'),
                 ),
-                const SizedBox(width: 12),
-                Container(
-                  width: 48, height: 48,
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.folder_open, color: AppTheme.onSurfaceVariant),
-                    onPressed: filePath != null
-                        ? () {
-                            final dir = Directory(filePath!).parent.path;
-                            OpenFilex.open(dir);
-                          }
-                        : null,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Container(
-                  width: 48, height: 48,
-                  decoration: BoxDecoration(
-                    color: AppTheme.errorContainer.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.delete_outline, color: AppTheme.error),
-                    onPressed: () {},
-                  ),
-                ),
-              ]),
+              ),
               const SizedBox(height: 80),
             ],
           ),
